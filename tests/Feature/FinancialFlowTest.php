@@ -428,6 +428,29 @@ it('authenticates an owner with the correct password and rejects an incorrect pa
     $this->assertAuthenticatedAs($owner);
 });
 
+it('creates a room with the login session on a host outside the configured domain list', function () {
+    $owner = User::factory()->create(['password' => 'secret-password']);
+    $siteUrl = 'https://finance.example.com';
+    $sessionCookieName = config('session.cookie');
+
+    $login = $this->postJson($siteUrl.'/login', [
+        'email' => $owner->email,
+        'password' => 'secret-password',
+    ])->assertOk()->assertCookie($sessionCookieName);
+
+    // Reset in-memory authentication and session state between HTTP requests.
+    Auth::forgetGuards();
+    session()->flush();
+
+    $room = $this->withCredentials()
+        ->withUnencryptedCookie($sessionCookieName, $login->getCookie($sessionCookieName, decrypt: false)->getValue())
+        ->withHeader('Origin', $siteUrl)
+        ->postJson($siteUrl.'/api/v1/rooms', ['name' => 'اتاق جدید']);
+
+    $room->assertCreated()->assertJsonPath('data.owner_user_id', $owner->id);
+    $this->assertDatabaseHas('rooms', ['owner_user_id' => $owner->id, 'name' => 'اتاق جدید']);
+});
+
 it('creates an owner room and its representative room member atomically', function () {
     $owner = User::factory()->create();
     $this->actingAs($owner)->postJson('/api/v1/rooms', [
